@@ -1,0 +1,21 @@
+{
+  "name": "ais140-server",
+  "version": "1.0.0",
+  "description": "AIS140 / VLTD TCP device server — receives, parses and stores AIS140 packets from GPS trackers",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "simulate": "node simulator.js"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "keywords": ["ais140", "vltd", "gps", "tracking", "india"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.2.0",
+    "mongoose": "^8.16.3"
+  }
+}
