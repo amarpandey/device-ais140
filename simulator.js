@@ -13,7 +13,7 @@
 const net = require('net');
 
 const HOST  = process.argv[2] || '127.0.0.1';
-const PORT  = parseInt(process.argv[3] || '5010', 10);
+const PORT  = parseInt(process.argv[3] || '5025', 10);
 const IMEI  = process.argv[4] || '123456789012345';
 const REGNO = process.argv[5] || 'MH12AB1234';
 

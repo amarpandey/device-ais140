@@ -29,6 +29,13 @@ const server = net.createServer(socket => {
 
   // ── Data handler ──
   socket.on('data', chunk => {
+    // Log every raw chunk immediately — before line-splitting — so we can see
+    // partial/binary/malformed data from devices that never send a full line.
+    const hex = chunk.toString('hex').match(/.{1,2}/g).join(' ');
+    const ascii = chunk.toString('ascii').replace(/[^\x20-\x7E]/g, '.');
+    console.log(`[${connId}] CHUNK (${chunk.length}B) ASCII: ${ascii}`);
+    console.log(`[${connId}] CHUNK HEX: ${hex}`);
+
     buf += chunk.toString('ascii');
 
     // Process every complete line (\n-terminated; strip any \r)
@@ -39,6 +46,12 @@ const server = net.createServer(socket => {
       handleLine(socket, connId, line.trim()).catch(err =>
         console.error(`[${connId}] Unhandled error:`, err.message)
       );
+    }
+
+    // Warn if buffer is growing without any newline (device not sending \\n)
+    if (buf.length > 2048) {
+      console.warn(`[${connId}] Buffer overflow (${buf.length}B, no newline) — flushing. Data: ${buf.slice(0, 200)}`);
+      buf = '';
     }
   });
 
