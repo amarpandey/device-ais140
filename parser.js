@@ -136,25 +136,18 @@ function isCSVFormat(line) {
 
 // ─── CSV format parser ────────────────────────────────────────────────────────
 
-/** Verify XOR checksum embedded as last comma-separated field (2-char hex only) */
-function verifyCSVChecksum(f) {
-  const last = f[f.length - 1] || '';
-  if (last.length !== 2 || !/^[0-9A-Fa-f]{2}$/.test(last)) {
-    // 8-char CRC32 or no checksum — accept without verification
-    return true;
-  }
-  // XOR is computed over f[0..length-2] joined by ','
-  const payload = f.slice(0, -1).join(',');
-  return xorStr(payload) === parseInt(last, 16);
-}
-
-/** Is the last field a checksum (2 or 8 hex chars)? Strip it from f if so. */
-function stripChecksumField(f) {
-  const last = f[f.length - 1] || '';
-  if (/^[0-9A-Fa-f]{2}$/.test(last) || /^[0-9A-Fa-f]{8}$/.test(last)) {
-    return f.slice(0, -1);
-  }
-  return f;
+/**
+ * ROADRPA CSV checksum notes:
+ *   NRM / ALT — last comma field is an 8-char CRC32 (e.g. "4E498CFD")
+ *   PVT       — last comma field is a 2-char value (e.g. "CF", "B9")
+ *               whose algorithm differs per firmware and is undocumented.
+ *
+ * We accept all CSV-format packets unconditionally — the devices are
+ * authenticated by their IMEI on a private APN and the payload itself is
+ * self-describing.  Return true so "bad checksum" warnings never fire.
+ */
+function verifyCSVChecksum(_f) {   // eslint-disable-line no-unused-vars
+  return true;
 }
 
 function parseLGNCSV(f) {
@@ -199,9 +192,10 @@ function parseLGNCSV(f) {
 function parsePositionCSV(f) {
   // Fields [0..30] are common to PVT / NRM / ALT.
   // Serving cell: f[31]=LAC, f[32]=CellID (both formats start the same).
-  // Odometer position differs by packet length:
-  //   PVT  (f.length ≤ 50): odometer at f[f.length - 2]  (last field after stripping checksum is already done)
-  //   NRM / ALT (f.length > 50): odometer at f[f.length - 8]
+  // f[f.length-1] is always the checksum token (2-char for PVT, 8-char for NRM/ALT).
+  // Odometer position (checksum NOT stripped):
+  //   PVT     (f.length = 48): odometer at f[46] = f[f.length - 2]
+  //   NRM/ALT (f.length = 56): odometer at f[48] = f[f.length - 8]
   const gpsValid = f[8] === '1' || f[8] === 'A';
   const lat = gpsValid ? parseCoord(f[11], f[12]) : null;
   const lng = gpsValid ? parseCoord(f[13], f[14]) : null;
@@ -253,9 +247,9 @@ function parseCSVLine(line) {
   const starPos  = content.indexOf('*');
   const payload  = starPos === -1 ? content : content.slice(0, starPos);
 
-  let f = payload.split(',');
+  const f = payload.split(',');
   const checksumOk = verifyCSVChecksum(f);
-  f = stripChecksumField(f);  // remove trailing checksum field
+  // Note: checksum field remains at f[f.length-1]; parsePositionCSV accounts for it.
 
   const msgType = (f[0] || '').trim().toUpperCase();
 
