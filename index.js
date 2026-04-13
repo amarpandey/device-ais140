@@ -21,7 +21,7 @@ const sessions = new Map();
 // ─── TCP Server ───────────────────────────────────────────────────────────────
 const server = net.createServer(socket => {
   const connId  = `${socket.remoteAddress}:${socket.remotePort}`;
-  let   buf     = '';  // accumulate partial data until \n
+  let   buf     = '';  // accumulate partial data until a complete packet is found
 
   console.log(`\n[+] New connection  ${connId}`);
 
@@ -29,28 +29,57 @@ const server = net.createServer(socket => {
 
   // ── Data handler ──
   socket.on('data', chunk => {
-    // Log every raw chunk immediately — before line-splitting — so we can see
-    // partial/binary/malformed data from devices that never send a full line.
-    const hex = chunk.toString('hex').match(/.{1,2}/g).join(' ');
     const ascii = chunk.toString('ascii').replace(/[^\x20-\x7E]/g, '.');
-    console.log(`[${connId}] CHUNK (${chunk.length}B) ASCII: ${ascii}`);
-    console.log(`[${connId}] CHUNK HEX: ${hex}`);
+    console.log(`[${connId}] CHUNK (${chunk.length}B): ${ascii}`);
 
     buf += chunk.toString('ascii');
 
-    // Process every complete line (\n-terminated; strip any \r)
-    let newline;
-    while ((newline = buf.indexOf('\n')) !== -1) {
-      const line = buf.slice(0, newline + 1);
-      buf = buf.slice(newline + 1);
-      handleLine(socket, connId, line.trim()).catch(err =>
-        console.error(`[${connId}] Unhandled error:`, err.message)
-      );
+    // ── Extract complete packets ───────────────────────────────────────────
+    // ROADRPA CSV format (all production devices): $MSGTYPE,...,CRC*
+    //   Packets start with '$' and end with '*'.
+    //   Multiple packets may be concatenated in one TCP chunk with no separator.
+    //   Checksum is the last comma field; nothing meaningful follows '*'.
+    //
+    // Legacy pipe format (reference spec): fields|...*XOR\r\n
+    //   Terminated by newline.
+
+    if (buf.includes('$')) {
+      // CSV path — extract every complete $...* packet
+      // Regex: from '$' to the next '*', not crossing another '$' or '*'
+      // Also consumes optional 2–8 hex chars and whitespace after '*' (legacy variant)
+      const csvRe = /\$[^$*]+\*[0-9A-Fa-f]{0,8}[\r\n]*/g;
+      const packets = [];
+      let m;
+      while ((m = csvRe.exec(buf)) !== null) {
+        packets.push({ pkt: m[0], end: m.index + m[0].length });
+      }
+
+      if (packets.length > 0) {
+        // Keep only the bytes after the last complete packet
+        buf = buf.slice(packets[packets.length - 1].end);
+        for (const { pkt } of packets) {
+          handleLine(socket, connId, pkt.trim()).catch(err =>
+            console.error(`[${connId}] Unhandled error:`, err.message)
+          );
+        }
+      }
+    } else {
+      // Legacy pipe path — newline terminated
+      let nl;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, nl + 1).trim();
+        buf = buf.slice(nl + 1);
+        if (line) {
+          handleLine(socket, connId, line).catch(err =>
+            console.error(`[${connId}] Unhandled error:`, err.message)
+          );
+        }
+      }
     }
 
-    // Warn if buffer is growing without any newline (device not sending \\n)
-    if (buf.length > 2048) {
-      console.warn(`[${connId}] Buffer overflow (${buf.length}B, no newline) — flushing. Data: ${buf.slice(0, 200)}`);
+    // Safety: flush if buffer grows without any complete packet (bad data)
+    if (buf.length > 4096) {
+      console.warn(`[${connId}] Buffer overflow (${buf.length}B, no complete packet) — flushing: ${buf.slice(0, 120)}`);
       buf = '';
     }
   });
